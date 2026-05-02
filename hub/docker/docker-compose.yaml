@@ -1,4 +1,3 @@
-version: "3.9"
 name: "road_vision__hub"
 services:
   mqtt:
@@ -16,7 +15,7 @@ services:
 
 
   postgres_db:
-    image: postgres:latest
+    image: postgres:16
     container_name: postgres_db
     restart: always
     environment:
@@ -30,6 +29,11 @@ services:
       - "5432:5432"
     networks:
       db_network:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d test_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 
   pgadmin:
@@ -51,7 +55,8 @@ services:
     container_name: store
     build: ../../store
     depends_on:
-      - postgres_db
+      postgres_db:
+        condition: service_healthy
     restart: always
     environment:
       POSTGRES_USER: user

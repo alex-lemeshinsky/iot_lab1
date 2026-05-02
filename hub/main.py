@@ -36,19 +36,48 @@ store_adapter = StoreApiAdapter(api_base_url=STORE_API_BASE_URL)
 app = FastAPI()
 
 
+def save_to_queue(processed_agent_data: ProcessedAgentData) -> int:
+    redis_client.rpush("processed_agent_data", processed_agent_data.model_dump_json())
+    return redis_client.llen("processed_agent_data")
+
+
+def pop_batch_if_ready() -> List[ProcessedAgentData]:
+    processed_agent_data_batch: List[ProcessedAgentData] = []
+    if redis_client.llen("processed_agent_data") < BATCH_SIZE:
+        return processed_agent_data_batch
+
+    for _ in range(BATCH_SIZE):
+        raw_data = redis_client.lpop("processed_agent_data")
+        if raw_data is None:
+            break
+        processed_agent_data_batch.append(
+            ProcessedAgentData.model_validate_json(raw_data)
+        )
+
+    return processed_agent_data_batch
+
+
 @app.post("/processed_agent_data/")
 async def save_processed_agent_data(processed_agent_data: ProcessedAgentData):
-    redis_client.lpush("processed_agent_data", processed_agent_data.model_dump_json())
-    if redis_client.llen("processed_agent_data") >= BATCH_SIZE:
-        processed_agent_data_batch: List[ProcessedAgentData] = []
-        for _ in range(BATCH_SIZE):
-            processed_agent_data = ProcessedAgentData.model_validate_json(
-                redis_client.lpop("processed_agent_data")
-            )
-            processed_agent_data_batch.append(processed_agent_data)
-        print(processed_agent_data_batch)
-        store_adapter.save_data(processed_agent_data_batch=processed_agent_data_batch)
-    return {"status": "ok"}
+    queue_size = save_to_queue(processed_agent_data)
+    processed_agent_data_batch = pop_batch_if_ready()
+    is_saved = store_adapter.save_data(processed_agent_data_batch)
+    return {
+        "status": "ok" if is_saved else "store_api_error",
+        "queued_before_flush": queue_size,
+        "flushed": len(processed_agent_data_batch),
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "queue_size": redis_client.llen("processed_agent_data"),
+        "batch_size": BATCH_SIZE,
+        "mqtt_topic": MQTT_TOPIC,
+        "store_api_base_url": STORE_API_BASE_URL,
+    }
 
 
 # MQTT
@@ -71,18 +100,15 @@ def on_message(client, userdata, msg):
             payload, strict=True
         )
 
-        redis_client.lpush(
-            "processed_agent_data", processed_agent_data.model_dump_json()
+        queue_size = save_to_queue(processed_agent_data)
+        processed_agent_data_batch = pop_batch_if_ready()
+        if processed_agent_data_batch:
+            store_adapter.save_data(processed_agent_data_batch)
+        logging.info(
+            "Processed MQTT message. Queue size before flush: %s. Flushed: %s",
+            queue_size,
+            len(processed_agent_data_batch),
         )
-        processed_agent_data_batch: List[ProcessedAgentData] = []
-        if redis_client.llen("processed_agent_data") >= BATCH_SIZE:
-            for _ in range(BATCH_SIZE):
-                processed_agent_data = ProcessedAgentData.model_validate_json(
-                    redis_client.lpop("processed_agent_data")
-                )
-                processed_agent_data_batch.append(processed_agent_data)
-        store_adapter.save_data(processed_agent_data_batch=processed_agent_data_batch)
-        return {"status": "ok"}
     except Exception as e:
         logging.info(f"Error processing MQTT message: {e}")
 
