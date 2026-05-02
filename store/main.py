@@ -1,7 +1,5 @@
-import asyncio
-import json
-from typing import Set, Dict, List, Any
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body
+from typing import Set, Dict, List
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import (
     create_engine,
     MetaData,
@@ -13,7 +11,7 @@ from sqlalchemy import (
     DateTime,
 )
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.sql import select
+from sqlalchemy.sql import delete, insert, select, update
 from datetime import datetime
 from pydantic import BaseModel, field_validator
 from config import (
@@ -45,6 +43,7 @@ processed_agent_data = Table(
     Column("timestamp", DateTime),
 )
 SessionLocal = sessionmaker(bind=engine)
+metadata.create_all(engine)
 
 
 # SQLAlchemy model
@@ -78,8 +77,8 @@ class AgentData(BaseModel):
     gps: GpsData
     timestamp: datetime
 
-    @classmethod
     @field_validator("timestamp", mode="before")
+    @classmethod
     def check_timestamp(cls, value):
         if isinstance(value, datetime):
             return value
@@ -111,24 +110,47 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        subscriptions[user_id].remove(websocket)
+        subscriptions[user_id].discard(websocket)
 
 
 # Function to send data to subscribed users
 async def send_data_to_subscribers(user_id: int, data):
     if user_id in subscriptions:
+        disconnected_websockets = []
         for websocket in subscriptions[user_id]:
-            await websocket.send_json(json.dumps(data))
+            try:
+                await websocket.send_json(data)
+            except WebSocketDisconnect:
+                disconnected_websockets.append(websocket)
+
+        for websocket in disconnected_websockets:
+            subscriptions[user_id].discard(websocket)
 
 
 # FastAPI CRUDL endpoints
 
 
-@app.post("/processed_agent_data/")
-async def create_processed_agent_data(data: List[ProcessedAgentData]):
-    # Insert data to database
-    # Send data to subscribers
-    pass
+@app.post("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
+async def create_processed_agent_data(
+    data: List[ProcessedAgentData],
+) -> list[ProcessedAgentDataInDB]:
+    created_items = []
+    with SessionLocal() as session:
+        for item in data:
+            values = _processed_agent_data_to_record(item)
+            result = session.execute(
+                insert(processed_agent_data)
+                .values(**values)
+                .returning(processed_agent_data)
+            )
+            created_items.append(_row_to_model(result.mappings().one()))
+
+        session.commit()
+
+    for item in created_items:
+        await send_data_to_subscribers(item.user_id, item.model_dump(mode="json"))
+
+    return created_items
 
 
 @app.get(
@@ -136,14 +158,27 @@ async def create_processed_agent_data(data: List[ProcessedAgentData]):
     response_model=ProcessedAgentDataInDB,
 )
 def read_processed_agent_data(processed_agent_data_id: int):
-    # Get data by id
-    pass
+    with SessionLocal() as session:
+        row = session.execute(
+            select(processed_agent_data).where(
+                processed_agent_data.c.id == processed_agent_data_id
+            )
+        ).mappings().first()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="ProcessedAgentData not found")
+
+    return _row_to_model(row)
 
 
 @app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
 def list_processed_agent_data():
-    # Get list of data
-    pass
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(processed_agent_data).order_by(processed_agent_data.c.id)
+        ).mappings().all()
+
+    return [_row_to_model(row) for row in rows]
 
 
 @app.put(
@@ -151,8 +186,25 @@ def list_processed_agent_data():
     response_model=ProcessedAgentDataInDB,
 )
 def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAgentData):
-    # Update data
-    pass
+    with SessionLocal() as session:
+        existing_row = session.execute(
+            select(processed_agent_data).where(
+                processed_agent_data.c.id == processed_agent_data_id
+            )
+        ).mappings().first()
+        if existing_row is None:
+            raise HTTPException(status_code=404, detail="ProcessedAgentData not found")
+
+        result = session.execute(
+            update(processed_agent_data)
+            .where(processed_agent_data.c.id == processed_agent_data_id)
+            .values(**_processed_agent_data_to_record(data))
+            .returning(processed_agent_data)
+        )
+        session.commit()
+        updated_item = _row_to_model(result.mappings().one())
+
+    return updated_item
 
 
 @app.delete(
@@ -160,8 +212,45 @@ def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAge
     response_model=ProcessedAgentDataInDB,
 )
 def delete_processed_agent_data(processed_agent_data_id: int):
-    # Delete by id
-    pass
+    with SessionLocal() as session:
+        result = session.execute(
+            delete(processed_agent_data)
+            .where(processed_agent_data.c.id == processed_agent_data_id)
+            .returning(processed_agent_data)
+        )
+        row = result.mappings().first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="ProcessedAgentData not found")
+        session.commit()
+
+    return _row_to_model(row)
+
+
+def _processed_agent_data_to_record(data: ProcessedAgentData):
+    return {
+        "road_state": data.road_state,
+        "user_id": data.agent_data.user_id,
+        "x": data.agent_data.accelerometer.x,
+        "y": data.agent_data.accelerometer.y,
+        "z": data.agent_data.accelerometer.z,
+        "latitude": data.agent_data.gps.latitude,
+        "longitude": data.agent_data.gps.longitude,
+        "timestamp": data.agent_data.timestamp,
+    }
+
+
+def _row_to_model(row) -> ProcessedAgentDataInDB:
+    return ProcessedAgentDataInDB(
+        id=row["id"],
+        road_state=row["road_state"],
+        user_id=row["user_id"],
+        x=row["x"],
+        y=row["y"],
+        z=row["z"],
+        latitude=row["latitude"],
+        longitude=row["longitude"],
+        timestamp=row["timestamp"],
+    )
 
 
 if __name__ == "__main__":
