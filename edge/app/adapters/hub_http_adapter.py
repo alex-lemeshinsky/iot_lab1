@@ -1,6 +1,6 @@
 import logging
 
-import requests as requests
+import requests
 
 from app.entities.processed_agent_data import ProcessedAgentData
 from app.interfaces.hub_gateway import HubGateway
@@ -20,10 +20,19 @@ class HubHttpAdapter(HubGateway):
         """
         url = f"{self.api_base_url}/processed_agent_data/"
 
-        response = requests.post(url, data=processed_data.model_dump_json())
-        if response.status_code != 200:
+        payload = processed_data.model_dump(mode="json")
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+        except requests.RequestException as exc:
+            logging.info("Hub HTTP request failed: %s", exc)
+            return False
+
+        if response.status_code not in (200, 201):
             logging.info(
-                f"Invalid Hub response\nData: {processed_data.model_dump_json()}\nResponse: {response}"
+                "Invalid Hub response. Data: %s. Response: %s %s",
+                payload,
+                response.status_code,
+                response.text,
             )
             return False
         return True

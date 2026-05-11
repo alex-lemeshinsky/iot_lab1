@@ -103,6 +103,39 @@ services:
       hub_store:
       hub_redis:
 
+  edge:
+    container_name: edge
+    build: ../../edge
+    depends_on:
+      - mqtt
+      - hub
+    restart: always
+    environment:
+      MQTT_BROKER_HOST: "mqtt"
+      MQTT_BROKER_PORT: 1883
+      MQTT_TOPIC: "agent_data_topic"
+      HUB_MQTT_BROKER_HOST: "mqtt"
+      HUB_MQTT_BROKER_PORT: 1883
+      HUB_MQTT_TOPIC: "processed_data_topic"
+    networks:
+      mqtt_network:
+
+  agent:
+    container_name: agent
+    build: ../../agent
+    depends_on:
+      - mqtt
+      - edge
+    restart: always
+    environment:
+      MQTT_BROKER_HOST: "mqtt"
+      MQTT_BROKER_PORT: 1883
+      MQTT_TOPIC: "agent_data_topic"
+      PARKING_MQTT_TOPIC: "parking_data_topic"
+      DELAY: 0.1
+    networks:
+      mqtt_network:
+
 
 networks:
   mqtt_network:

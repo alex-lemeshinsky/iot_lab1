@@ -1,10 +1,8 @@
-import logging
-
-import requests as requests
 from paho.mqtt import client as mqtt_client
 
 from app.entities.processed_agent_data import ProcessedAgentData
 from app.interfaces.hub_gateway import HubGateway
+import logging
 
 
 class HubMqttAdapter(HubGateway):
@@ -26,21 +24,24 @@ class HubMqttAdapter(HubGateway):
         result = self.mqtt_client.publish(self.topic, msg)
         status = result[0]
         if status == 0:
+            logging.info("Published processed road data to MQTT topic %s", self.topic)
             return True
-        else:
-            print(f"Failed to send message to topic {self.topic}")
-            return False
+
+        logging.info("Failed to send message to topic %s", self.topic)
+        return False
 
     @staticmethod
     def _connect_mqtt(broker, port):
         """Create MQTT client"""
-        print(f"CONNECT TO {broker}:{port}")
+        logging.info("CONNECT TO %s:%s", broker, port)
 
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
-                print(f"Connected to MQTT Broker ({broker}:{port})!")
+                logging.info("Connected to MQTT Broker (%s:%s)!", broker, port)
             else:
-                print("Failed to connect {broker}:{port}, return code %d\n", rc)
+                logging.info(
+                    "Failed to connect %s:%s, return code %s", broker, port, rc
+                )
                 exit(rc)  # Stop execution
 
         client = mqtt_client.Client()

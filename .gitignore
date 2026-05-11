@@ -1,5 +1,8 @@
 report/
 report_lab12/
 report_lab13/
+report_lab14/
 tmp/
 *.log
+__pycache__
+.DS_Store
