@@ -53,6 +53,11 @@ class LineMapLayer(MapLayer):
         return self._line_points_offset
 
     def calc_line_points(self):
+        if not self.coordinates:
+            self._line_points = []
+            self._line_points_offset = (0, 0)
+            return
+
         # Offset all points by the coordinates of the first point,
         # to keep coordinates closer to zero.
         # (and therefore avoid some float precision issues when drawing lines)
@@ -102,7 +107,7 @@ class LineMapLayer(MapLayer):
         self._draw_line()
 
     def _draw_line(self, *args):
-        if self._coordinates is None:
+        if not self._coordinates:
             return
         map_view = self.parent
         self.zoom = map_view.zoom
