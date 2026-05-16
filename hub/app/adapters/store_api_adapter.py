@@ -4,6 +4,7 @@ from typing import List
 import requests
 
 from app.entities.processed_agent_data import ProcessedAgentData
+from app.entities.sensor_data import SensorReading
 from app.interfaces.store_gateway import StoreGateway
 
 
@@ -42,4 +43,33 @@ class StoreApiAdapter(StoreGateway):
             return True
         except requests.RequestException as exc:
             logging.info("Store API request failed: %s", exc)
+            return False
+
+    def save_sensor_data(self, sensor_reading_batch: List[SensorReading]) -> bool:
+        """
+        Save universal sensor readings to the Store API.
+        """
+        if not sensor_reading_batch:
+            return True
+
+        url = f"{self.api_base_url}/sensor_readings/"
+        payload = [
+            sensor_reading.model_dump(mode="json")
+            for sensor_reading in sensor_reading_batch
+        ]
+
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code not in (200, 201):
+                logging.info(
+                    "Invalid Store API response. Sensor data: %s. Response: %s %s",
+                    payload,
+                    response.status_code,
+                    response.text,
+                )
+                return False
+            logging.info("Saved %s sensor readings to Store API", len(payload))
+            return True
+        except requests.RequestException as exc:
+            logging.info("Store API sensor request failed: %s", exc)
             return False

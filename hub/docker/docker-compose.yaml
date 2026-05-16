@@ -95,6 +95,7 @@ services:
       MQTT_BROKER_HOST: "mqtt"
       MQTT_BROKER_PORT: 1883
       MQTT_TOPIC: "processed_data_topic"
+      SENSOR_MQTT_TOPIC: "sensor_data_topic"
       BATCH_SIZE: 1
     ports:
       - "9000:8000"
@@ -132,6 +133,8 @@ services:
       MQTT_BROKER_PORT: 1883
       MQTT_TOPIC: "agent_data_topic"
       PARKING_MQTT_TOPIC: "parking_data_topic"
+      SENSOR_MQTT_TOPIC: "sensor_data_topic"
+      PARKING_CAPACITY: 80
       DELAY: 0.1
     networks:
       mqtt_network:

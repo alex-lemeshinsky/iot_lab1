@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 from app.adapters.store_api_adapter import StoreApiAdapter
 from app.entities.agent_data import AccelerometerData, AgentData, GpsData
 from app.entities.processed_agent_data import ProcessedAgentData
+from app.entities.sensor_data import SensorObject, SensorReading
 
 class TestStoreApiAdapter(unittest.TestCase):
     def setUp(self):
@@ -71,6 +72,32 @@ class TestStoreApiAdapter(unittest.TestCase):
         )
         # Ensure that the result is False, indicating failure to save
         self.assertFalse(result)
+
+    @patch.object(requests, "post")
+    def test_save_sensor_data_success(self, mock_post):
+        sensor_reading = SensorReading(
+            sensor_object=SensorObject(
+                object_id="parking_kyiv_podil_001",
+                object_type="parking",
+                name="Synthetic Podil Parking",
+                gps=GpsData(latitude=50.45, longitude=30.52),
+                metadata={"capacity": 80},
+            ),
+            sensor_type="parking_occupancy",
+            timestamp="2026-05-14T12:00:00",
+            payload={"empty_count": 20, "occupied_count": 60},
+        )
+        mock_response = Mock(status_code=201)
+        mock_post.return_value = mock_response
+
+        result = self.store_api_adapter.save_sensor_data([sensor_reading])
+
+        mock_post.assert_called_once_with(
+            "http://test-api.com/sensor_readings/",
+            json=[sensor_reading.model_dump(mode="json")],
+            timeout=10,
+        )
+        self.assertTrue(result)
 
 if __name__ == "__main__":
     unittest.main()

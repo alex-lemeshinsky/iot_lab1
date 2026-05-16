@@ -4,6 +4,8 @@ from domain.accelerometer import Accelerometer
 from domain.gps import Gps
 from domain.aggregated_data import AggregatedData
 from domain.parking import Parking
+from domain.sensor_object import SensorObject
+from domain.sensor_reading import SensorReading
 import config
 
 
@@ -23,6 +25,7 @@ class FileDatasource:
         self.accelerometer_reader = None
         self.gps_reader = None
         self.parking_reader = None
+        self.sensor_sequence_index = 0
 
     def read(self) -> AggregatedData:
         """Метод повертає дані отримані з датчиків"""
@@ -60,6 +63,17 @@ class FileDatasource:
                 float(parking_row["latitude"]),
             ),
         )
+
+    def read_sensor_readings(self, parking: Parking | None = None) -> list[SensorReading]:
+        """Повертає універсальні записи сенсорних об'єктів для лабораторної 2."""
+        if parking is None:
+            parking = self.read_parking()
+
+        timestamp = datetime.now()
+        traffic_light_reading = self._build_traffic_light_reading(timestamp)
+        parking_reading = self._build_parking_reading(parking, timestamp)
+        self.sensor_sequence_index += 1
+        return [parking_reading, traffic_light_reading]
 
     def startReading(self, *args, **kwargs):
         """Метод повинен викликатись перед початком читання даних"""
@@ -120,3 +134,88 @@ class FileDatasource:
             file_handle.seek(0)
             setattr(self, reader_attr, DictReader(file_handle))
             return next(getattr(self, reader_attr))
+
+    def _build_parking_reading(
+        self, parking: Parking, timestamp: datetime
+    ) -> SensorReading:
+        capacity = config.PARKING_CAPACITY
+        empty_count = max(0, min(capacity, parking.empty_count))
+        occupied_count = capacity - empty_count
+        occupancy_percent = round((occupied_count / capacity) * 100, 2)
+
+        sensor_object = SensorObject(
+            object_id="parking_kyiv_podil_001",
+            object_type="parking",
+            name="Synthetic Podil Parking",
+            gps=parking.gps,
+            metadata={
+                "city": "Kyiv",
+                "capacity": capacity,
+                "open_dataset_basis": "urban parking occupancy profiles",
+                "lab": "2",
+            },
+        )
+
+        return SensorReading(
+            sensor_object=sensor_object,
+            sensor_type="parking_occupancy",
+            timestamp=timestamp,
+            payload={
+                "capacity": capacity,
+                "empty_count": empty_count,
+                "occupied_count": occupied_count,
+                "occupancy_percent": occupancy_percent,
+            },
+        )
+
+    def _build_traffic_light_reading(self, timestamp: datetime) -> SensorReading:
+        phases = [
+            ("green", 35),
+            ("yellow", 5),
+            ("red", 40),
+        ]
+        cycle_length = sum(duration for _, duration in phases)
+        position = (self.sensor_sequence_index * 7) % cycle_length
+        phase = phases[0][0]
+        remaining_seconds = phases[0][1]
+        offset = position
+        for phase_name, duration in phases:
+            if offset < duration:
+                phase = phase_name
+                remaining_seconds = duration - offset
+                break
+            offset -= duration
+
+        if phase == "red":
+            queue_length = min(18, 5 + self.sensor_sequence_index % 14)
+        elif phase == "yellow":
+            queue_length = 3 + self.sensor_sequence_index % 5
+        else:
+            queue_length = max(0, 6 - self.sensor_sequence_index % 7)
+
+        sensor_object = SensorObject(
+            object_id="traffic_light_kyiv_sahaidachnoho_001",
+            object_type="traffic_light",
+            name="Synthetic Sahaidachnoho Traffic Light",
+            gps=Gps(longitude=30.5229, latitude=50.4598),
+            metadata={
+                "city": "Kyiv",
+                "intersection": "Sahaidachnoho / Kontraktova",
+                "cycle_seconds": cycle_length,
+                "open_dataset_basis": "traffic signal phase and vehicle queue profiles",
+                "lab": "2",
+            },
+        )
+
+        return SensorReading(
+            sensor_object=sensor_object,
+            sensor_type="traffic_signal_state",
+            timestamp=timestamp,
+            payload={
+                "phase": phase,
+                "cycle_seconds": cycle_length,
+                "remaining_seconds": remaining_seconds,
+                "vehicle_queue_length": queue_length,
+                "pedestrian_request": self.sensor_sequence_index % 4 == 0,
+            },
+        )

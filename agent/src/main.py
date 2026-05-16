@@ -2,6 +2,7 @@ from paho.mqtt import client as mqtt_client
 import time
 from schema.aggregated_data_schema import AggregatedDataSchema
 from schema.parking_schema import ParkingSchema
+from schema.sensor_reading_schema import SensorReadingSchema
 from file_datasource import FileDatasource
 import config
 
@@ -36,9 +37,13 @@ def publish(client, datasource, delay):
     while True:
         time.sleep(delay)
         agent_msg = AggregatedDataSchema().dumps(datasource.read())
-        parking_msg = ParkingSchema().dumps(datasource.read_parking())
+        parking = datasource.read_parking()
+        parking_msg = ParkingSchema().dumps(parking)
         publish_message(client, config.MQTT_TOPIC, agent_msg)
         publish_message(client, config.PARKING_MQTT_TOPIC, parking_msg)
+        for sensor_reading in datasource.read_sensor_readings(parking):
+            sensor_msg = SensorReadingSchema().dumps(sensor_reading)
+            publish_message(client, config.SENSOR_MQTT_TOPIC, sensor_msg)
 
 
 def run():
