@@ -36,3 +36,18 @@ CREATE TABLE sensor_readings (
 CREATE INDEX sensor_readings_object_id_idx ON sensor_readings (object_id);
 CREATE INDEX sensor_readings_sensor_type_idx ON sensor_readings (sensor_type);
 CREATE INDEX sensor_readings_timestamp_idx ON sensor_readings (timestamp);
+
+CREATE TABLE network_metrics (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP NOT NULL,
+    processed_messages_total INTEGER NOT NULL,
+    sensor_messages_total INTEGER NOT NULL,
+    processed_messages_per_second FLOAT NOT NULL,
+    sensor_messages_per_second FLOAT NOT NULL,
+    throughput_kbps FLOAT NOT NULL,
+    estimated_latency_ms FLOAT NOT NULL,
+    packet_loss_percent FLOAT NOT NULL,
+    mqtt_health INTEGER NOT NULL
+);
+
+CREATE INDEX network_metrics_timestamp_idx ON network_metrics (timestamp);
